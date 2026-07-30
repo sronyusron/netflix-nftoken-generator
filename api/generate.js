@@ -156,12 +156,12 @@ module.exports = async (req, res) => {
     let nftoken = null;
     let method = '';
 
-    // Method 1: GET /LoginTransfer - Netflix generates nftoken in redirect
+    // Method 1: GET /token - Netflix token generation endpoint
     try {
       const result = await httpsRequest({
         hostname: 'www.netflix.com',
         port: 443,
-        path: '/LoginTransfer',
+        path: '/token',
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -173,11 +173,34 @@ module.exports = async (req, res) => {
 
       if (result.nftoken) {
         nftoken = result.nftoken;
-        method = 'LoginTransfer';
+        method = 'token';
       }
     } catch (e) {}
 
-    // Method 2: GET /nftoken - direct token endpoint
+    // Method 2: GET /LoginTransfer - Netflix generates nftoken in redirect
+    if (!nftoken) {
+      try {
+        const result = await httpsRequest({
+          hostname: 'www.netflix.com',
+          port: 443,
+          path: '/LoginTransfer',
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Cookie': cookieString,
+          },
+        });
+
+        if (result.nftoken) {
+          nftoken = result.nftoken;
+          method = 'LoginTransfer';
+        }
+      } catch (e) {}
+    }
+
+    // Method 3: GET /nftoken - direct token endpoint
     if (!nftoken) {
       try {
         const result = await httpsRequest({
@@ -199,7 +222,7 @@ module.exports = async (req, res) => {
       } catch (e) {}
     }
 
-    // Method 3: GET /YourAccount - parse token from page
+    // Method 4: GET /YourAccount - parse token from page
     if (!nftoken) {
       try {
         const result = await httpsRequest({
@@ -217,6 +240,28 @@ module.exports = async (req, res) => {
         if (result.nftoken) {
           nftoken = result.nftoken;
           method = 'YourAccount';
+        }
+      } catch (e) {}
+    }
+
+    // Method 5: GET /browse - sometimes nftoken in page source
+    if (!nftoken) {
+      try {
+        const result = await httpsRequest({
+          hostname: 'www.netflix.com',
+          port: 443,
+          path: '/browse',
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Cookie': cookieString,
+          },
+        });
+
+        if (result.nftoken) {
+          nftoken = result.nftoken;
+          method = 'browse';
         }
       } catch (e) {}
     }
