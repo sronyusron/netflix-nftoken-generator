@@ -514,44 +514,63 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
               <h2 class="result-title">Error</h2>
               <p class="error-message">Gagal parsing cookies. Pastikan format sudah benar (JSON, Netscape, atau Raw string).</p>
             `;
-          } else {
-            const nftoken = extractNFToken(parsedCookies);
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+            return;
+          }
 
-            if (!nftoken) {
-              resultSection.className = 'result-section visible error';
-              resultContent.innerHTML = `
-                <h2 class="result-title">Error</h2>
-                <p class="error-message">Cookie "NetflixId" atau "SecureNetflixId" tidak ditemukan. Pastikan kamu sudah login ke Netflix sebelum export cookies.</p>
-              `;
-            } else {
-              const link = 'https://netflix.com/?nftoken=' + nftoken;
-              const expiry = getExpiry(parsedCookies);
-
+          // Send to server API for Netflix token generation
+          fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookies: input.trim() }),
+          })
+          .then(r => r.json())
+          .then(data => {
+            if (data.success) {
               resultSection.className = 'result-section visible';
               resultContent.innerHTML = `
                 <h2 class="result-title">Hasil Generate</h2>
                 <p class="result-label">Link Login Otomatis</p>
                 <div class="link-row">
-                  <input type="text" class="link-input" id="link-output" value="${link}" readonly>
+                  <input type="text" class="link-input" id="link-output" value="${data.link}" readonly>
                   <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
                   <button class="btn btn-open" onclick="handleOpen()">Buka</button>
                 </div>
                 <p class="result-label">Masa Berlaku (Expiry)</p>
-                <p class="expiry-value">${expiry || 'Tidak diketahui'}</p>
+                <p class="expiry-value">${data.expiry || 'Tidak diketahui'}</p>
+              `;
+            } else {
+              resultSection.className = 'result-section visible error';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Error</h2>
+                <p class="error-message">${data.error || 'Gagal generate token.'}</p>
               `;
             }
-          }
+
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+          })
+          .catch(err => {
+            resultSection.className = 'result-section visible error';
+            resultContent.innerHTML = `
+              <h2 class="result-title">Error</h2>
+              <p class="error-message">Gagal menghubungi server. Pastikan file api/generate.js sudah di-deploy ke Vercel.</p>
+            `;
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+          });
+
         } catch (error) {
           resultSection.className = 'result-section visible error';
           resultContent.innerHTML = `
             <h2 class="result-title">Error</h2>
             <p class="error-message">Terjadi kesalahan: ${error.message}</p>
           `;
+          btnGenerate.disabled = false;
+          btnGenerate.innerHTML = 'Generate Link 🚀';
         }
-
-        btnGenerate.disabled = false;
-        btnGenerate.innerHTML = 'Generate Link 🚀';
-      }, 300);
+      }, 100);
     }
 
     function handleClear() {
