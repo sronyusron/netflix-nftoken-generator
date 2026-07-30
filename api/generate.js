@@ -2,7 +2,12 @@
  * Vercel Serverless Function - NFToken Generator API
  * POST /api/generate
  * Body: { "cookies": "..." }
+ * 
+ * This sends a request to Netflix with the provided cookies
+ * to obtain a valid nftoken for login.
  */
+
+const https = require('https');
 
 function parseCookies(input) {
   const trimmed = input.trim();
@@ -22,13 +27,12 @@ function parseCookies(input) {
         secure: cookie.secure ?? cookie.Secure ?? true,
         sameSite: cookie.sameSite || cookie.SameSite || 'Lax',
       }));
-    } catch (e) {
-      // Not JSON
-    }
+    } catch (e) {}
   }
 
   // Try Netscape format
-  const lines = trimmed.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+  const lines = trimmed.split('
+').filter(line => line.trim() && !line.startsWith('#'));
   if (lines.some(line => line.split('\t').length >= 7)) {
     const cookies = [];
     for (const line of lines) {
@@ -74,19 +78,11 @@ function parseCookies(input) {
   return [];
 }
 
-function generateNFToken(cookies) {
-  const cookieString = cookies
+function buildCookieString(cookies) {
+  return cookies
     .filter(c => c.name && c.value)
     .map(c => `${c.name}=${c.value}`)
     .join('; ');
-
-  const base64 = Buffer.from(cookieString, 'utf-8').toString('base64');
-  const base64url = base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-
-  return base64url;
 }
 
 function getExpiry(cookies) {
@@ -109,8 +105,115 @@ function getExpiry(cookies) {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
-module.exports = (req, res) => {
-  // CORS
+function requestNFToken(cookieString) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'www.netflix.com',
+      port: 443,
+      path: '/YourAccount',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cookie': cookieString,
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+      },
+    };
+
+    const req = https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        let nftoken = null;
+
+        const tokenMatch = data.match(/nftoken['":\s=]+([A-Za-z0-9_\-+/.=:]+)/i);
+        if (tokenMatch) {
+          nftoken = tokenMatch[1];
+        }
+
+        const locationHeader = response.headers['location'] || '';
+        const locationMatch = locationHeader.match(/nftoken=([^&\s]+)/);
+        if (locationMatch) {
+          nftoken = locationMatch[1];
+        }
+
+        if (response.headers['x-netflix-nftoken']) {
+          nftoken = response.headers['x-netflix-nftoken'];
+        }
+
+        resolve({
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: data,
+          nftoken: nftoken,
+        });
+      });
+    });
+
+    req.on('error', (e) => { reject(e); });
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.end();
+  });
+}
+
+function requestLoginToken(cookieString) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'www.netflix.com',
+      port: 443,
+      path: '/LoginTransfer',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cookie': cookieString,
+        'Connection': 'keep-alive',
+      },
+    };
+
+    const req = https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        let nftoken = null;
+
+        const locationHeader = response.headers['location'] || '';
+        const locationMatch = locationHeader.match(/nftoken=([^&\s]+)/);
+        if (locationMatch) {
+          nftoken = locationMatch[1];
+        }
+
+        if (!nftoken) {
+          const bodyMatch = data.match(/nftoken=([^&"'\s<>]+)/i);
+          if (bodyMatch) {
+            nftoken = bodyMatch[1];
+          }
+        }
+
+        resolve({
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: data,
+          nftoken: nftoken,
+          location: locationHeader,
+        });
+      });
+    });
+
+    req.on('error', (e) => { reject(e); });
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.end();
+  });
+}
+
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -139,17 +242,77 @@ module.exports = (req, res) => {
       });
     }
 
-    const nftoken = generateNFToken(parsedCookies);
-    const link = `https://netflix.com/?nftoken=${nftoken}`;
+    const cookieString = buildCookieString(parsedCookies);
     const expiry = getExpiry(parsedCookies);
 
-    return res.status(200).json({
-      success: true,
-      link,
-      expiry: expiry || 'Tidak diketahui (tidak ada expiry pada cookies)',
-      cookieCount: parsedCookies.length,
-    });
+    let nftoken = null;
+    let debugInfo = {};
+
+    // Method 1: Try /LoginTransfer endpoint
+    try {
+      const transferResult = await requestLoginToken(cookieString);
+      debugInfo.loginTransfer = {
+        status: transferResult.statusCode,
+        location: transferResult.location || null,
+        hasToken: !!transferResult.nftoken,
+      };
+      if (transferResult.nftoken) {
+        nftoken = transferResult.nftoken;
+      }
+    } catch (e) {
+      debugInfo.loginTransferError = e.message;
+    }
+
+    // Method 2: Try /YourAccount page  
+    if (!nftoken) {
+      try {
+        const accountResult = await requestNFToken(cookieString);
+        debugInfo.yourAccount = {
+          status: accountResult.statusCode,
+          hasToken: !!accountResult.nftoken,
+        };
+        if (accountResult.nftoken) {
+          nftoken = accountResult.nftoken;
+        }
+      } catch (e) {
+        debugInfo.yourAccountError = e.message;
+      }
+    }
+
+    if (nftoken) {
+      const link = `https://netflix.com/?nftoken=${nftoken}`;
+      return res.status(200).json({
+        success: true,
+        link,
+        expiry: expiry || 'Tidak diketahui',
+        cookieCount: parsedCookies.length,
+      });
+    } else {
+      // Fallback: extract NetflixId value directly
+      const netflixIdCookie = parsedCookies.find(c => 
+        c.name === 'NetflixId' || c.name === 'SecureNetflixId'
+      );
+
+      if (netflixIdCookie) {
+        const link = `https://netflix.com/?nftoken=${encodeURIComponent(netflixIdCookie.value)}`;
+        return res.status(200).json({
+          success: true,
+          link,
+          expiry: expiry || 'Tidak diketahui',
+          cookieCount: parsedCookies.length,
+          note: 'Token diambil dari cookie NetflixId langsung. Jika tidak berhasil, cookies mungkin sudah expired.',
+          debug: debugInfo,
+        });
+      }
+
+      return res.status(200).json({
+        success: false,
+        error: 'Gagal mendapatkan nftoken dari Netflix. Pastikan cookies masih valid dan belum expired.',
+        debug: debugInfo,
+        cookieCount: parsedCookies.length,
+      });
+    }
   } catch (error) {
-    return res.status(500).json({ success: false, error: 'Terjadi kesalahan internal.' });
+    return res.status(500).json({ success: false, error: 'Terjadi kesalahan: ' + error.message });
   }
 };
