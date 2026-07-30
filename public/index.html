@@ -399,6 +399,7 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
      * Extract the nftoken from Netflix cookies.
      * The nftoken is the 'ct' parameter extracted from the NetflixId cookie value.
      * NetflixId format: v=3&ct=TOKEN_HERE&pg=...&ch=...
+     * Netflix expects standard base64 format (with + / =), not base64url (- _ no padding)
      */
     function extractNFToken(cookies) {
       // Find NetflixId cookie
@@ -407,7 +408,6 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
         // Decode the cookie value first (it's URL-encoded)
         let value = netflixId.value;
         try {
-          // Try decoding if it's URL-encoded
           if (value.includes('%')) {
             value = decodeURIComponent(value);
           }
@@ -416,7 +416,17 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
         // Extract 'ct' parameter from the value (format: v=3&ct=TOKEN&pg=...&ch=...)
         const ctMatch = value.match(/[?&]?ct=([^&]+)/);
         if (ctMatch && ctMatch[1]) {
-          return ctMatch[1];
+          let token = ctMatch[1];
+          // Convert base64url to standard base64 if needed
+          // base64url uses - instead of + and _ instead of /
+          if (token.includes('-') || token.includes('_')) {
+            token = token.replace(/-/g, '+').replace(/_/g, '/');
+            // Add padding if needed
+            while (token.length % 4 !== 0) {
+              token += '=';
+            }
+          }
+          return token;
         }
 
         // If no ct= found, return the whole value as fallback
@@ -435,7 +445,14 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
 
         const ctMatch = value.match(/[?&]?ct=([^&]+)/);
         if (ctMatch && ctMatch[1]) {
-          return ctMatch[1];
+          let token = ctMatch[1];
+          if (token.includes('-') || token.includes('_')) {
+            token = token.replace(/-/g, '+').replace(/_/g, '/');
+            while (token.length % 4 !== 0) {
+              token += '=';
+            }
+          }
+          return token;
         }
 
         return secureNetflixId.value;
