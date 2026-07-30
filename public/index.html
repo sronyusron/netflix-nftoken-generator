@@ -357,135 +357,9 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
   </div>
 
   <script>
-    // ======== Cookie Parsing Logic ========
-
-    /**
-     * Parse cookies from various formats:
-     * 1. JSON array format (from EditThisCookie / Cookie-Editor)
-     * 2. Netscape/Mozilla cookie format (tab-separated)
-     * 3. Raw cookie header string (name=value; name2=value2)
-     */
-    function parseCookies(input) {
-      const trimmed = input.trim();
-
-      // Try JSON format first
-      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-        try {
-          let parsed = JSON.parse(trimmed);
-          if (!Array.isArray(parsed)) {
-            parsed = [parsed];
-          }
-          return parsed.map(cookie => ({
-            name: cookie.name || cookie.Name || '',
-            value: cookie.value || cookie.Value || '',
-            domain: cookie.domain || cookie.Domain || '.netflix.com',
-            path: cookie.path || cookie.Path || '/',
-            expires: cookie.expires || cookie.expirationDate || cookie.Expires || 0,
-            httpOnly: cookie.httpOnly ?? cookie.HttpOnly ?? false,
-            secure: cookie.secure ?? cookie.Secure ?? true,
-            sameSite: cookie.sameSite || cookie.SameSite || 'Lax',
-          }));
-        } catch (e) {
-          // Not valid JSON, continue
-        }
-      }
-
-      // Try Netscape format (tab-separated)
-      const lines = trimmed.split('\n').filter(line => line.trim() && !line.startsWith('#'));
-      if (lines.some(line => line.split('\t').length >= 7)) {
-        const cookies = [];
-        for (const line of lines) {
-          const parts = line.split('\t');
-          if (parts.length >= 7) {
-            cookies.push({
-              name: parts[5].trim(),
-              value: parts[6].trim(),
-              domain: parts[0].trim(),
-              path: parts[2].trim(),
-              expires: parseInt(parts[4].trim()) || 0,
-              httpOnly: parts[1].trim().toUpperCase() === 'TRUE',
-              secure: parts[3].trim().toUpperCase() === 'TRUE',
-              sameSite: 'Lax',
-            });
-          }
-        }
-        if (cookies.length > 0) return cookies;
-      }
-
-      // Try raw cookie header format (name=value; name2=value2)
-      if (trimmed.includes('=') && !trimmed.includes('\t')) {
-        const pairs = trimmed.split(';').map(p => p.trim()).filter(Boolean);
-        const cookies = [];
-        for (const pair of pairs) {
-          const eqIndex = pair.indexOf('=');
-          if (eqIndex > 0) {
-            cookies.push({
-              name: pair.substring(0, eqIndex).trim(),
-              value: pair.substring(eqIndex + 1).trim(),
-              domain: '.netflix.com',
-              path: '/',
-              expires: 0,
-              httpOnly: false,
-              secure: true,
-              sameSite: 'Lax',
-            });
-          }
-        }
-        if (cookies.length > 0) return cookies;
-      }
-
-      return [];
-    }
-
-    /**
-     * Generate NFToken from parsed cookies.
-     * Base64url-encoded cookie header string.
-     */
-    function generateNFToken(cookies) {
-      // Build cookie string: name=value pairs joined by "; "
-      const cookieString = cookies
-        .filter(c => c.name && c.value)
-        .map(c => `${c.name}=${c.value}`)
-        .join('; ');
-
-      // Base64 encode
-      const base64 = btoa(unescape(encodeURIComponent(cookieString)));
-
-      // Make URL-safe (base64url)
-      const base64url = base64
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-
-      return base64url;
-    }
-
-    /**
-     * Get the earliest expiry date from cookies
-     */
-    function getExpiry(cookies) {
-      const expiryTimes = cookies
-        .map(c => c.expires || c.expirationDate || 0)
-        .filter(t => t && t > 0);
-
-      if (expiryTimes.length === 0) return null;
-
-      const earliestExpiry = Math.min(...expiryTimes);
-      const date = new Date(earliestExpiry * 1000);
-
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      const seconds = String(date.getSeconds()).padStart(2, '0');
-
-      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    }
-
     // ======== UI Handlers ========
 
-    function handleGenerate() {
+    async function handleGenerate() {
       const input = document.getElementById('cookie-input').value;
       const resultSection = document.getElementById('result-section');
       const resultContent = document.getElementById('result-content');
@@ -504,47 +378,51 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
       btnGenerate.disabled = true;
       btnGenerate.innerHTML = '<span class="spinner"></span> Generating...';
 
-      // Small delay for UX
-      setTimeout(() => {
-        try {
-          const parsedCookies = parseCookies(input);
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cookies: input.trim() }),
+        });
 
-          if (parsedCookies.length === 0) {
-            resultSection.className = 'result-section visible error';
-            resultContent.innerHTML = `
-              <h2 class="result-title">Error</h2>
-              <p class="error-message">Gagal parsing cookies. Pastikan format sudah benar (JSON, Netscape, atau Raw string).</p>
-            `;
-          } else {
-            const nftoken = generateNFToken(parsedCookies);
-            const link = `https://netflix.com/?nftoken=${nftoken}`;
-            const expiry = getExpiry(parsedCookies);
+        const data = await response.json();
 
-            resultSection.className = 'result-section visible';
-            resultContent.innerHTML = `
-              <h2 class="result-title">Hasil Generate</h2>
-              <p class="result-label">Link Login Otomatis</p>
-              <div class="link-row">
-                <input type="text" class="link-input" id="link-output" value="${link}" readonly>
-                <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
-                <button class="btn btn-open" onclick="handleOpen()">Buka</button>
-              </div>
-              <p class="result-label">Masa Berlaku (Expiry)</p>
-              <p class="expiry-value">${expiry || 'Tidak diketahui (tidak ada expiry pada cookies)'}</p>
-            `;
+        if (data.success) {
+          resultSection.className = 'result-section visible';
+          let noteHtml = '';
+          if (data.note) {
+            noteHtml = `<p style="color: #fbbf24; font-size: 0.8rem; margin-top: 0.8rem;">⚠️ ${data.note}</p>`;
           }
-        } catch (error) {
+          resultContent.innerHTML = `
+            <h2 class="result-title">Hasil Generate</h2>
+            <p class="result-label">Link Login Otomatis</p>
+            <div class="link-row">
+              <input type="text" class="link-input" id="link-output" value="${data.link}" readonly>
+              <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
+              <button class="btn btn-open" onclick="handleOpen()">Buka</button>
+            </div>
+            <p class="result-label">Masa Berlaku (Expiry)</p>
+            <p class="expiry-value">${data.expiry || 'Tidak diketahui'}</p>
+            ${noteHtml}
+          `;
+        } else {
           resultSection.className = 'result-section visible error';
           resultContent.innerHTML = `
             <h2 class="result-title">Error</h2>
-            <p class="error-message">Terjadi kesalahan: ${error.message}</p>
+            <p class="error-message">${data.error}</p>
           `;
         }
+      } catch (error) {
+        resultSection.className = 'result-section visible error';
+        resultContent.innerHTML = `
+          <h2 class="result-title">Error</h2>
+          <p class="error-message">Terjadi kesalahan koneksi. Coba lagi.</p>
+        `;
+      }
 
-        // Reset button
-        btnGenerate.disabled = false;
-        btnGenerate.innerHTML = 'Generate Link 🚀';
-      }, 300);
+      // Reset button
+      btnGenerate.disabled = false;
+      btnGenerate.innerHTML = 'Generate Link 🚀';
     }
 
     function handleClear() {
