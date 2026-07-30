@@ -1,15 +1,68 @@
 /**
  * Vercel Serverless Function - NFToken Generator API
  * POST /api/generate
- * Body: { "cookies": "..." (JSON string of cookie array) }
+ * Body: { "cookies": "..." }
  * 
- * Two-step process:
- * 1. GET /browse with cookies → extract BUILD_IDENTIFIER and authURL
- * 2. POST /api/shakti/{BUILD_ID}/pathEvaluator → get nftoken
+ * Uses Netflix iOS API endpoint to generate nftoken.
+ * Based on: https://github.com/harshitkamboj/Netflix-NFToken-Generator
  */
 
 const https = require('https');
 const { URL } = require('url');
+
+const API_HOST = 'ios.prod.ftl.netflix.com';
+const API_PATH = '/iosui/user/15.48';
+
+const QUERY_PARAMS = {
+  appVersion: '15.48.1',
+  config: '{"gamesInTrailersEnabled":"false","isTrailersEvidenceEnabled":"false","cdsMyListSortEnabled":"true","kidsBillboardEnabled":"true","addHorizontalBoxArtToVideoSummariesEnabled":"false","skOverlayTestEnabled":"false","homeFeedTestTVMovieListsEnabled":"false","baselineOnIpadEnabled":"true","trailersVideoIdLoggingFixEnabled":"true","postPlayPreviewsEnabled":"false","bypassContextualAssetsEnabled":"false","roarEnabled":"false","useSeason1AltLabelEnabled":"false","disableCDSSearchPaginationSectionKinds":["searchVideoCarousel"],"cdsSearchHorizontalPaginationEnabled":"true","searchPreQueryGamesEnabled":"true","kidsMyListEnabled":"true","billboardEnabled":"true","useCDSGalleryEnabled":"true","contentWarningEnabled":"true","videosInPopularGamesEnabled":"true","avifFormatEnabled":"false","sharksEnabled":"true"}',
+  device_type: 'NFAPPL-02-',
+  esn: 'NFAPPL-02-IPHONE8%3D1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
+  idiom: 'phone',
+  iosVersion: '15.8.5',
+  isTablet: 'false',
+  languages: 'en-US',
+  locale: 'en-US',
+  maxDeviceWidth: '375',
+  model: 'saget',
+  modelType: 'IPHONE8-1',
+  odpAware: 'true',
+  path: '["account","token","default"]',
+  pathFormat: 'graph',
+  pixelDensity: '2.0',
+  progressive: 'false',
+  responseFormat: 'json',
+};
+
+const BASE_HEADERS = {
+  'User-Agent': 'Argo/15.48.1 (iPhone; iOS 15.8.5; Scale/2.00)',
+  'x-netflix.request.attempt': '1',
+  'x-netflix.request.client.user.guid': 'A4CS633D7VCBPE2GPK2HL4EKOE',
+  'x-netflix.context.profile-guid': 'A4CS633D7VCBPE2GPK2HL4EKOE',
+  'x-netflix.request.routing': '{"path":"/nq/mobile/nqios/~15.48.0/user","control_tag":"iosui_argo"}',
+  'x-netflix.context.app-version': '15.48.1',
+  'x-netflix.argo.translated': 'true',
+  'x-netflix.context.form-factor': 'phone',
+  'x-netflix.context.sdk-version': '2012.4',
+  'x-netflix.client.appversion': '15.48.1',
+  'x-netflix.context.max-device-width': '375',
+  'x-netflix.context.ab-tests': '',
+  'x-netflix.tracing.cl.useractionid': '4DC655F2-9C3C-4343-8229-CA1B003C3053',
+  'x-netflix.client.type': 'argo',
+  'x-netflix.client.ftl.esn': 'NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
+  'x-netflix.context.locales': 'en-US',
+  'x-netflix.context.top-level-uuid': '90AFE39F-ADF1-4D8A-B33E-528730990FE3',
+  'x-netflix.client.iosversion': '15.8.5',
+  'accept-language': 'en-US;q=1',
+  'x-netflix.argo.abtests': '',
+  'x-netflix.context.os-version': '15.8.5',
+  'x-netflix.request.client.context': '{"appState":"foreground"}',
+  'x-netflix.context.ui-flavor': 'argo',
+  'x-netflix.argo.nfnsm': '9',
+  'x-netflix.context.pixel-density': '2.0',
+  'x-netflix.request.toplevel.uuid': '90AFE39F-ADF1-4D8A-B33E-528730990FE3',
+  'x-netflix.request.client.timezoneid': 'Asia/Dhaka',
+};
 
 function parseCookies(input) {
   const trimmed = input.trim();
@@ -49,111 +102,70 @@ function parseCookies(input) {
   return [];
 }
 
-function buildCookieString(cookies) {
-  return cookies.filter(c => c.name && c.value).map(c => `${c.name}=${c.value}`).join('; ');
+function decodeValue(value) {
+  if (typeof value === 'string' && value.includes('%')) {
+    try { return decodeURIComponent(value); } catch (e) {}
+  }
+  return value;
 }
 
-function getExpiry(cookies) {
-  const expiryTimes = cookies.map(c => c.expires || 0).filter(t => t > 0);
-  if (expiryTimes.length === 0) return null;
-  const earliest = Math.min(...expiryTimes);
-  const d = new Date(earliest * 1000);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+function getExpiry(expires) {
+  if (!expires) return 'Tidak diketahui';
+  // If milliseconds (13 digits), convert to seconds
+  if (typeof expires === 'number' && String(expires).length === 13) {
+    expires = Math.floor(expires / 1000);
+  }
+  try {
+    const d = new Date(expires * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  } catch (e) {
+    return String(expires);
+  }
 }
 
-function httpsGet(url, cookieString) {
+function fetchNFToken(netflixId) {
   return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
+    // Build query string
+    const queryString = Object.entries(QUERY_PARAMS)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+
     const options = {
-      hostname: parsed.hostname,
+      hostname: API_HOST,
       port: 443,
-      path: parsed.pathname + parsed.search,
+      path: `${API_PATH}?${queryString}`,
       method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Cookie': cookieString,
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1',
+        ...BASE_HEADERS,
+        'Cookie': `NetflixId=${netflixId}`,
       },
+      rejectUnauthorized: false,
     };
 
     const req = https.request(options, (res) => {
-      // Follow redirects
-      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-        const redirectUrl = new URL(res.headers.location, url);
-        // Check if redirect contains nftoken
-        const nftMatch = redirectUrl.href.match(/nftoken=([^&\s]+)/);
-        if (nftMatch) {
-          resolve({ body: '', nftoken: nftMatch[1], statusCode: res.statusCode });
-          res.resume();
-          return;
-        }
-        res.resume();
-        httpsGet(redirectUrl.href, cookieString).then(resolve).catch(reject);
-        return;
-      }
-
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        const nftMatch = data.match(/nftoken=([^&"'\s<>]+)/i);
-        resolve({ body: data, nftoken: nftMatch ? nftMatch[1] : null, statusCode: res.statusCode, headers: res.headers });
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.end();
-  });
-}
+        try {
+          const json = JSON.parse(data);
+          // Navigate: value.account.token.default.token
+          const tokenData = ((((json.value || {}).account || {}).token || {}).default) || {};
+          const token = tokenData.token || null;
+          const expires = tokenData.expires || null;
 
-function httpsPost(url, cookieString, postBody, contentType) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const options = {
-      hostname: parsed.hostname,
-      port: 443,
-      path: parsed.pathname + parsed.search,
-      method: 'POST',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Content-Type': contentType || 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postBody),
-        'Cookie': cookieString,
-        'X-Netflix.Client.Request.Name': 'ui/nftoken',
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-        const redirectUrl = new URL(res.headers.location, url);
-        const nftMatch = redirectUrl.href.match(/nftoken=([^&\s]+)/);
-        if (nftMatch) {
-          resolve({ body: '', nftoken: nftMatch[1], statusCode: res.statusCode });
-          res.resume();
-          return;
+          if (token) {
+            resolve({ token, expires });
+          } else {
+            reject(new Error('No token in response. Response: ' + data.substring(0, 200)));
+          }
+        } catch (e) {
+          reject(new Error('Failed to parse response: ' + data.substring(0, 200)));
         }
-        res.resume();
-        resolve({ body: '', nftoken: null, statusCode: res.statusCode, location: res.headers.location });
-        return;
-      }
-
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        const nftMatch = data.match(/nftoken['":\s]*=?\s*['"]?([A-Za-z0-9+/=]{100,})/);
-        resolve({ body: data, nftoken: nftMatch ? nftMatch[1] : null, statusCode: res.statusCode });
       });
     });
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.write(postBody);
+
+    req.on('error', (e) => reject(e));
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('Request timeout')); });
     req.end();
   });
 }
@@ -164,146 +176,40 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const { cookies: cookieInput } = req.body;
     if (!cookieInput || typeof cookieInput !== 'string') {
-      return res.status(400).json({ success: false, error: 'Input cookies tidak valid.' });
+      return res.status(400).json({ error: 'Input cookies tidak valid.' });
     }
 
     const parsedCookies = parseCookies(cookieInput);
     if (parsedCookies.length === 0) {
-      return res.status(400).json({ success: false, error: 'Gagal parsing cookies.' });
+      return res.status(400).json({ error: 'Gagal parsing cookies.' });
     }
 
-    const cookieString = buildCookieString(parsedCookies);
-    const expiry = getExpiry(parsedCookies);
-    let nftoken = null;
-    let method = '';
-    let debugInfo = [];
-
-    // Step 1: GET /browse to extract BUILD_IDENTIFIER and authURL
-    let buildId = null;
-    let authURL = null;
-
-    try {
-      const browseResult = await httpsGet('https://www.netflix.com/browse', cookieString);
-      debugInfo.push({ step: 'browse', status: browseResult.statusCode, bodyLen: browseResult.body.length });
-
-      if (browseResult.nftoken) {
-        nftoken = browseResult.nftoken;
-        method = 'browse-redirect';
-      } else {
-        // Extract BUILD_IDENTIFIER
-        const buildMatch = browseResult.body.match(/\"BUILD_IDENTIFIER\"\s*:\s*\"([^\"]+)\"/);
-        if (buildMatch) buildId = buildMatch[1];
-
-        // Extract authURL
-        const authMatch = browseResult.body.match(/\"authURL\"\s*:\s*\"([^\"]+)\"/);
-        if (authMatch) authURL = authMatch[1];
-
-        debugInfo.push({ buildId, authURL: authURL ? authURL.substring(0, 20) + '...' : null });
-      }
-    } catch (e) {
-      debugInfo.push({ step: 'browse', error: e.message });
+    // Find NetflixId cookie
+    const netflixIdCookie = parsedCookies.find(c => c.name === 'NetflixId');
+    if (!netflixIdCookie) {
+      return res.status(400).json({ error: 'Cookie "NetflixId" tidak ditemukan. Pastikan sudah login Netflix sebelum export cookies.' });
     }
 
-    // Step 2: Use Shakti API to get nftoken
-    if (!nftoken && buildId && authURL) {
-      try {
-        const shaktiUrl = `https://www.netflix.com/api/shakti/${buildId}/pathEvaluator?materialize=true`;
-        const postBody = `path=["nftoken"]&authURL=${encodeURIComponent(authURL)}`;
-        const shaktiResult = await httpsPost(shaktiUrl, cookieString, postBody, 'application/x-www-form-urlencoded');
-        debugInfo.push({ step: 'shakti', status: shaktiResult.statusCode, bodyLen: shaktiResult.body.length });
+    // Decode the NetflixId value if URL-encoded
+    const netflixId = decodeValue(netflixIdCookie.value);
 
-        if (shaktiResult.nftoken) {
-          nftoken = shaktiResult.nftoken;
-          method = 'shakti';
-        } else {
-          // Try parsing JSON response for token
-          try {
-            const jsonData = JSON.parse(shaktiResult.body);
-            // Look for nftoken in various places in the response
-            const findToken = (obj, depth = 0) => {
-              if (depth > 5 || !obj) return null;
-              if (typeof obj === 'string' && obj.length > 100 && obj.match(/^[A-Za-z0-9+/=_-]+$/)) return obj;
-              if (typeof obj === 'object') {
-                for (const key of Object.keys(obj)) {
-                  if (key.toLowerCase().includes('token') || key.toLowerCase().includes('nftoken')) {
-                    if (typeof obj[key] === 'string') return obj[key];
-                  }
-                  const found = findToken(obj[key], depth + 1);
-                  if (found) return found;
-                }
-              }
-              return null;
-            };
-            const found = findToken(jsonData);
-            if (found) {
-              nftoken = found;
-              method = 'shakti-json';
-            }
-          } catch (e) {}
-        }
-      } catch (e) {
-        debugInfo.push({ step: 'shakti', error: e.message });
-      }
-    }
-
-    // Step 3: Try /LoginTransfer
-    if (!nftoken) {
-      try {
-        const result = await httpsGet('https://www.netflix.com/LoginTransfer', cookieString);
-        debugInfo.push({ step: 'LoginTransfer', status: result.statusCode });
-        if (result.nftoken) { nftoken = result.nftoken; method = 'LoginTransfer'; }
-      } catch (e) {
-        debugInfo.push({ step: 'LoginTransfer', error: e.message });
-      }
-    }
-
-    // Step 4: Try /token
-    if (!nftoken) {
-      try {
-        const result = await httpsGet('https://www.netflix.com/token', cookieString);
-        debugInfo.push({ step: 'token', status: result.statusCode });
-        if (result.nftoken) { nftoken = result.nftoken; method = 'token'; }
-      } catch (e) {
-        debugInfo.push({ step: 'token', error: e.message });
-      }
-    }
-
-    // Step 5: Try Shakti with different path format
-    if (!nftoken && buildId && authURL) {
-      try {
-        const shaktiUrl = `https://www.netflix.com/api/shakti/${buildId}/pathEvaluator`;
-        const postBody = `path=["tokenGeneration","nftoken"]&authURL=${encodeURIComponent(authURL)}`;
-        const result = await httpsPost(shaktiUrl, cookieString, postBody, 'application/x-www-form-urlencoded');
-        debugInfo.push({ step: 'shakti2', status: result.statusCode });
-        if (result.nftoken) { nftoken = result.nftoken; method = 'shakti2'; }
-      } catch (e) {
-        debugInfo.push({ step: 'shakti2', error: e.message });
-      }
-    }
-
-    if (nftoken) {
-      return res.status(200).json({
-        token: nftoken,
-        loginLink: `https://netflix.com/?nftoken=${nftoken}`,
-        expiry: expiry || 'Tidak diketahui',
-        cookieCount: parsedCookies.length,
-        method,
-      });
-    }
+    // Fetch nftoken from Netflix iOS API
+    const { token, expires } = await fetchNFToken(netflixId);
+    const expiry = getExpiry(expires);
+    const loginLink = `https://netflix.com/?nftoken=${token}`;
 
     return res.status(200).json({
-      success: false,
-      error: 'Gagal mendapatkan nftoken dari Netflix. Cookies mungkin expired atau endpoint berubah.',
-      debug: debugInfo,
-      cookieCount: parsedCookies.length,
+      token,
+      loginLink,
+      expiry,
     });
 
   } catch (error) {
-    return res.status(500).json({ success: false, error: 'Server error: ' + error.message });
+    return res.status(500).json({ error: error.message || 'Terjadi kesalahan server.' });
   }
 };
