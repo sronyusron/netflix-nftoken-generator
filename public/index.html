@@ -25,7 +25,6 @@
       margin: 0 auto;
     }
 
-    /* Header */
     .header {
       text-align: center;
       margin-bottom: 2rem;
@@ -51,7 +50,6 @@
       font-size: 0.95rem;
     }
 
-    /* Input Section */
     .input-section {
       background-color: #1e1e1e;
       border: 1px solid #333;
@@ -91,7 +89,6 @@
       color: #555;
     }
 
-    /* Buttons */
     .buttons {
       display: flex;
       justify-content: flex-end;
@@ -162,7 +159,6 @@
       background-color: #1d4ed8;
     }
 
-    /* Result Section */
     .result-section {
       background-color: #1a1a1a;
       border: 1px solid #333;
@@ -228,7 +224,6 @@
       font-size: 0.95rem;
     }
 
-    /* Spinner */
     .spinner {
       display: inline-block;
       width: 16px;
@@ -243,7 +238,6 @@
       to { transform: rotate(360deg); }
     }
 
-    /* Footer */
     .footer {
       text-align: center;
       margin-top: 2rem;
@@ -255,7 +249,6 @@
       margin-top: 0.3rem;
     }
 
-    /* Responsive */
     @media (max-width: 640px) {
       .header h1 {
         font-size: 1.5rem;
@@ -286,7 +279,6 @@
       }
     }
 
-    /* Scrollbar */
     textarea::-webkit-scrollbar {
       width: 6px;
     }
@@ -307,7 +299,6 @@
 </head>
 <body>
   <div class="container">
-    <!-- Header -->
     <div class="header">
       <h1>
         <span class="emoji">🎬</span>
@@ -316,27 +307,14 @@
       <p>Ubah cookies Netflix kamu menjadi link login langsung instan</p>
     </div>
 
-    <!-- Input Section -->
     <div class="input-section">
       <label for="cookie-input">Masukkan Cookies Netflix (Raw string, JSON, atau Netscape format):</label>
       <textarea
         id="cookie-input"
-        placeholder="Contoh format JSON:
-[
-  {
-    &quot;name&quot;: &quot;NetflixId&quot;,
-    &quot;value&quot;: &quot;abc123...&quot;,
-    &quot;domain&quot;: &quot;.netflix.com&quot;,
-    &quot;path&quot;: &quot;/&quot;,
-    &quot;expires&quot;: 1816930582
-  }
-]
+        placeholder="Paste semua cookies Netflix kamu di sini...
 
-Atau Netscape format:
-.netflix.com&#9;TRUE&#9;/&#9;TRUE&#9;1816930582&#9;NetflixId&#9;value_here
-
-Atau Raw string:
-NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
+Pastikan ada cookie NetflixId dan SecureNetflixId.
+Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
 
       <div class="buttons">
         <button class="btn btn-clear" onclick="handleClear()">Bersihkan</button>
@@ -344,12 +322,10 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
       </div>
     </div>
 
-    <!-- Result Section -->
     <div class="result-section" id="result-section">
       <div id="result-content"></div>
     </div>
 
-    <!-- Footer -->
     <div class="footer">
       <p>Netflix NFToken Generator - Web Version</p>
       <p>Tool ini hanya untuk tujuan edukasi.</p>
@@ -357,9 +333,143 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
   </div>
 
   <script>
+    /**
+     * Parse cookies from various formats
+     */
+    function parseCookies(input) {
+      const trimmed = input.trim();
+
+      // Try JSON format
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          let parsed = JSON.parse(trimmed);
+          if (!Array.isArray(parsed)) parsed = [parsed];
+          return parsed.map(cookie => ({
+            name: cookie.name || cookie.Name || '',
+            value: cookie.value || cookie.Value || '',
+            domain: cookie.domain || cookie.Domain || '.netflix.com',
+            path: cookie.path || cookie.Path || '/',
+            expires: cookie.expires || cookie.expirationDate || cookie.Expires || 0,
+          }));
+        } catch (e) {}
+      }
+
+      // Try Netscape format
+      const lines = trimmed.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+      if (lines.some(line => line.split('\t').length >= 7)) {
+        const cookies = [];
+        for (const line of lines) {
+          const parts = line.split('\t');
+          if (parts.length >= 7) {
+            cookies.push({
+              name: parts[5].trim(),
+              value: parts[6].trim(),
+              domain: parts[0].trim(),
+              path: parts[2].trim(),
+              expires: parseInt(parts[4].trim()) || 0,
+            });
+          }
+        }
+        if (cookies.length > 0) return cookies;
+      }
+
+      // Try raw cookie string
+      if (trimmed.includes('=') && !trimmed.includes('\t')) {
+        const pairs = trimmed.split(';').map(p => p.trim()).filter(Boolean);
+        const cookies = [];
+        for (const pair of pairs) {
+          const eqIndex = pair.indexOf('=');
+          if (eqIndex > 0) {
+            cookies.push({
+              name: pair.substring(0, eqIndex).trim(),
+              value: pair.substring(eqIndex + 1).trim(),
+              domain: '.netflix.com',
+              path: '/',
+              expires: 0,
+            });
+          }
+        }
+        if (cookies.length > 0) return cookies;
+      }
+
+      return [];
+    }
+
+    /**
+     * Extract the nftoken from Netflix cookies.
+     * The nftoken is the 'ct' parameter extracted from the NetflixId cookie value.
+     * NetflixId format: v=3&ct=TOKEN_HERE&pg=...&ch=...
+     */
+    function extractNFToken(cookies) {
+      // Find NetflixId cookie
+      const netflixId = cookies.find(c => c.name === 'NetflixId');
+      if (netflixId && netflixId.value) {
+        // Decode the cookie value first (it's URL-encoded)
+        let value = netflixId.value;
+        try {
+          // Try decoding if it's URL-encoded
+          if (value.includes('%')) {
+            value = decodeURIComponent(value);
+          }
+        } catch(e) {}
+
+        // Extract 'ct' parameter from the value (format: v=3&ct=TOKEN&pg=...&ch=...)
+        const ctMatch = value.match(/[?&]?ct=([^&]+)/);
+        if (ctMatch && ctMatch[1]) {
+          return ctMatch[1];
+        }
+
+        // If no ct= found, return the whole value as fallback
+        return netflixId.value;
+      }
+
+      // Fallback: try SecureNetflixId
+      const secureNetflixId = cookies.find(c => c.name === 'SecureNetflixId');
+      if (secureNetflixId && secureNetflixId.value) {
+        let value = secureNetflixId.value;
+        try {
+          if (value.includes('%')) {
+            value = decodeURIComponent(value);
+          }
+        } catch(e) {}
+
+        const ctMatch = value.match(/[?&]?ct=([^&]+)/);
+        if (ctMatch && ctMatch[1]) {
+          return ctMatch[1];
+        }
+
+        return secureNetflixId.value;
+      }
+
+      return null;
+    }
+
+    /**
+     * Get expiry from cookies
+     */
+    function getExpiry(cookies) {
+      const expiryTimes = cookies
+        .map(c => c.expires || 0)
+        .filter(t => t > 0);
+
+      if (expiryTimes.length === 0) return null;
+
+      const earliestExpiry = Math.min(...expiryTimes);
+      const date = new Date(earliestExpiry * 1000);
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+
     // ======== UI Handlers ========
 
-    async function handleGenerate() {
+    function handleGenerate() {
       const input = document.getElementById('cookie-input').value;
       const resultSection = document.getElementById('result-section');
       const resultContent = document.getElementById('result-content');
@@ -374,55 +484,57 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
         return;
       }
 
-      // Show loading
       btnGenerate.disabled = true;
       btnGenerate.innerHTML = '<span class="spinner"></span> Generating...';
 
-      try {
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cookies: input.trim() }),
-        });
+      setTimeout(() => {
+        try {
+          const parsedCookies = parseCookies(input);
 
-        const data = await response.json();
+          if (parsedCookies.length === 0) {
+            resultSection.className = 'result-section visible error';
+            resultContent.innerHTML = `
+              <h2 class="result-title">Error</h2>
+              <p class="error-message">Gagal parsing cookies. Pastikan format sudah benar (JSON, Netscape, atau Raw string).</p>
+            `;
+          } else {
+            const nftoken = extractNFToken(parsedCookies);
 
-        if (data.success) {
-          resultSection.className = 'result-section visible';
-          let noteHtml = '';
-          if (data.note) {
-            noteHtml = `<p style="color: #fbbf24; font-size: 0.8rem; margin-top: 0.8rem;">⚠️ ${data.note}</p>`;
+            if (!nftoken) {
+              resultSection.className = 'result-section visible error';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Error</h2>
+                <p class="error-message">Cookie "NetflixId" atau "SecureNetflixId" tidak ditemukan. Pastikan kamu sudah login ke Netflix sebelum export cookies.</p>
+              `;
+            } else {
+              const link = 'https://netflix.com/?nftoken=' + nftoken;
+              const expiry = getExpiry(parsedCookies);
+
+              resultSection.className = 'result-section visible';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Hasil Generate</h2>
+                <p class="result-label">Link Login Otomatis</p>
+                <div class="link-row">
+                  <input type="text" class="link-input" id="link-output" value="${link}" readonly>
+                  <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
+                  <button class="btn btn-open" onclick="handleOpen()">Buka</button>
+                </div>
+                <p class="result-label">Masa Berlaku (Expiry)</p>
+                <p class="expiry-value">${expiry || 'Tidak diketahui'}</p>
+              `;
+            }
           }
-          resultContent.innerHTML = `
-            <h2 class="result-title">Hasil Generate</h2>
-            <p class="result-label">Link Login Otomatis</p>
-            <div class="link-row">
-              <input type="text" class="link-input" id="link-output" value="${data.link}" readonly>
-              <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
-              <button class="btn btn-open" onclick="handleOpen()">Buka</button>
-            </div>
-            <p class="result-label">Masa Berlaku (Expiry)</p>
-            <p class="expiry-value">${data.expiry || 'Tidak diketahui'}</p>
-            ${noteHtml}
-          `;
-        } else {
+        } catch (error) {
           resultSection.className = 'result-section visible error';
           resultContent.innerHTML = `
             <h2 class="result-title">Error</h2>
-            <p class="error-message">${data.error}</p>
+            <p class="error-message">Terjadi kesalahan: ${error.message}</p>
           `;
         }
-      } catch (error) {
-        resultSection.className = 'result-section visible error';
-        resultContent.innerHTML = `
-          <h2 class="result-title">Error</h2>
-          <p class="error-message">Terjadi kesalahan koneksi. Coba lagi.</p>
-        `;
-      }
 
-      // Reset button
-      btnGenerate.disabled = false;
-      btnGenerate.innerHTML = 'Generate Link 🚀';
+        btnGenerate.disabled = false;
+        btnGenerate.innerHTML = 'Generate Link 🚀';
+      }, 300);
     }
 
     function handleClear() {
@@ -445,7 +557,6 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
             btnCopy.classList.remove('copied');
           }, 2000);
         }).catch(() => {
-          // Fallback
           linkInput.select();
           document.execCommand('copy');
           btnCopy.textContent = 'Tersalin!';
@@ -465,7 +576,6 @@ NetflixId=abc123; SecureNetflixId=xyz789"></textarea>
       }
     }
 
-    // Allow Ctrl+Enter to generate
     document.addEventListener('keydown', function(e) {
       if (e.ctrlKey && e.key === 'Enter') {
         handleGenerate();
