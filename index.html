@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Netflix NFToken Generator</title>
+  <meta name="description" content="Ubah cookies Netflix kamu menjadi link login langsung instan">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background-color: #141414;
+      color: #ffffff;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .header h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+    }
+
+    .header h1 .emoji {
+      font-size: 2.5rem;
+      margin-right: 0.3rem;
+    }
+
+    .header h1 .title-text {
+      color: #e50914;
+    }
+
+    .header p {
+      color: #999;
+      font-size: 0.95rem;
+    }
+
+    .input-section {
+      background-color: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .input-section label {
+      display: block;
+      color: #ccc;
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 0.75rem;
+    }
+
+    .input-section textarea {
+      width: 100%;
+      height: 220px;
+      background-color: #0d0d0d;
+      color: #4ade80;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      padding: 1rem;
+      border: 1px solid #444;
+      border-radius: 8px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-section textarea:focus {
+      border-color: #e50914;
+    }
+
+    .input-section textarea::placeholder {
+      color: #555;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .btn {
+      padding: 0.7rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .btn-clear {
+      background-color: #2a2a2a;
+      color: #fff;
+      border: 1px solid #555;
+    }
+
+    .btn-clear:hover {
+      background-color: #3a3a3a;
+    }
+
+    .btn-generate {
+      background-color: #e50914;
+      color: #fff;
+    }
+
+    .btn-generate:hover {
+      background-color: #b20710;
+    }
+
+    .btn-generate:disabled {
+      background-color: #5a0509;
+      cursor: not-allowed;
+    }
+
+    .btn-copy {
+      background-color: #16a34a;
+      color: #fff;
+      padding: 0.6rem 1rem;
+      font-size: 0.85rem;
+    }
+
+    .btn-copy:hover {
+      background-color: #15803d;
+    }
+
+    .btn-copy.copied {
+      background-color: #166534;
+    }
+
+    .btn-open {
+      background-color: #2563eb;
+      color: #fff;
+      padding: 0.6rem 1rem;
+      font-size: 0.85rem;
+    }
+
+    .btn-open:hover {
+      background-color: #1d4ed8;
+    }
+
+    .result-section {
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: none;
+    }
+
+    .result-section.visible {
+      display: block;
+    }
+
+    .result-section.error {
+      background-color: #2a1a1a;
+      border-color: #5a1a1a;
+    }
+
+    .result-title {
+      color: #e50914;
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+
+    .result-label {
+      color: #999;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .link-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .link-input {
+      flex: 1;
+      background-color: #0d0d0d;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid #444;
+      border-radius: 8px;
+      outline: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .expiry-value {
+      color: #4ade80;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    .error-message {
+      color: #fca5a5;
+      font-size: 0.95rem;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #fff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 2rem;
+      color: #555;
+      font-size: 0.75rem;
+    }
+
+    .footer p + p {
+      margin-top: 0.3rem;
+    }
+
+    @media (max-width: 640px) {
+      .header h1 {
+        font-size: 1.5rem;
+      }
+
+      .header h1 .emoji {
+        font-size: 1.8rem;
+      }
+
+      .buttons {
+        flex-direction: column;
+      }
+
+      .btn {
+        justify-content: center;
+      }
+
+      .link-row {
+        flex-direction: column;
+      }
+
+      .link-input {
+        width: 100%;
+      }
+
+      .link-row .btn {
+        width: 100%;
+      }
+    }
+
+    textarea::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    textarea::-webkit-scrollbar-track {
+      background: #1a1a1a;
+    }
+
+    textarea::-webkit-scrollbar-thumb {
+      background: #444;
+      border-radius: 3px;
+    }
+
+    textarea::-webkit-scrollbar-thumb:hover {
+      background: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>
+        <span class="emoji">🎬</span>
+        <span class="title-text">Netflix NFToken Generator</span>
+      </h1>
+      <p>Ubah cookies Netflix kamu menjadi link login langsung instan</p>
+    </div>
+
+    <div class="input-section">
+      <label for="cookie-input">Masukkan Cookies Netflix (Raw string, JSON, atau Netscape format):</label>
+      <textarea
+        id="cookie-input"
+        placeholder="Paste semua cookies Netflix kamu di sini...
+
+Pastikan ada cookie NetflixId dan SecureNetflixId.
+Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
+
+      <div class="buttons">
+        <button class="btn btn-clear" onclick="handleClear()">Bersihkan</button>
+        <button class="btn btn-generate" id="btn-generate" onclick="handleGenerate()">Generate Link 🚀</button>
+      </div>
+    </div>
+
+    <div class="result-section" id="result-section">
+      <div id="result-content"></div>
+    </div>
+
+    <div class="footer">
+      <p>Netflix NFToken Generator - Web Version</p>
+      <p>Tool ini hanya untuk tujuan edukasi.</p>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * Parse cookies from various formats
+     */
+    function parseCookies(input) {
+      const trimmed = input.trim();
+
+      // Try JSON format
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          let parsed = JSON.parse(trimmed);
+          if (!Array.isArray(parsed)) parsed = [parsed];
+          return parsed.map(cookie => ({
+            name: cookie.name || cookie.Name || '',
+            value: cookie.value || cookie.Value || '',
+            domain: cookie.domain || cookie.Domain || '.netflix.com',
+            path: cookie.path || cookie.Path || '/',
+            expires: cookie.expires || cookie.expirationDate || cookie.Expires || 0,
+          }));
+        } catch (e) {}
+      }
+
+      // Try Netscape format
+      const lines = trimmed.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+      if (lines.some(line => line.split('\t').length >= 7)) {
+        const cookies = [];
+        for (const line of lines) {
+          const parts = line.split('\t');
+          if (parts.length >= 7) {
+            cookies.push({
+              name: parts[5].trim(),
+              value: parts[6].trim(),
+              domain: parts[0].trim(),
+              path: parts[2].trim(),
+              expires: parseInt(parts[4].trim()) || 0,
+            });
+          }
+        }
+        if (cookies.length > 0) return cookies;
+      }
+
+      // Try raw cookie string
+      if (trimmed.includes('=') && !trimmed.includes('\t')) {
+        const pairs = trimmed.split(';').map(p => p.trim()).filter(Boolean);
+        const cookies = [];
+        for (const pair of pairs) {
+          const eqIndex = pair.indexOf('=');
+          if (eqIndex > 0) {
+            cookies.push({
+              name: pair.substring(0, eqIndex).trim(),
+              value: pair.substring(eqIndex + 1).trim(),
+              domain: '.netflix.com',
+              path: '/',
+              expires: 0,
+            });
+          }
+        }
+        if (cookies.length > 0) return cookies;
+      }
+
+      return [];
+    }
+
+    /**
+     * Extract the nftoken from Netflix cookies.
+     * The nftoken is the 'ct' parameter extracted from the NetflixId cookie value.
+     * NetflixId format: v=3&ct=TOKEN_HERE&pg=...&ch=...
+     * Netflix expects standard base64 format (with + / =), not base64url (- _ no padding)
+     */
+    function extractNFToken(cookies) {
+      // Find NetflixId cookie
+      const netflixId = cookies.find(c => c.name === 'NetflixId');
+      if (netflixId && netflixId.value) {
+        // Decode the cookie value first (it's URL-encoded)
+        let value = netflixId.value;
+        try {
+          if (value.includes('%')) {
+            value = decodeURIComponent(value);
+          }
+        } catch(e) {}
+
+        // Extract 'ct' parameter from the value (format: v=3&ct=TOKEN&pg=...&ch=...)
+        const ctMatch = value.match(/[?&]?ct=([^&]+)/);
+        if (ctMatch && ctMatch[1]) {
+          let token = ctMatch[1];
+          // Convert base64url to standard base64 if needed
+          // base64url uses - instead of + and _ instead of /
+          if (token.includes('-') || token.includes('_')) {
+            token = token.replace(/-/g, '+').replace(/_/g, '/');
+            // Add padding if needed
+            while (token.length % 4 !== 0) {
+              token += '=';
+            }
+          }
+          return token;
+        }
+
+        // If no ct= found, return the whole value as fallback
+        return netflixId.value;
+      }
+
+      // Fallback: try SecureNetflixId
+      const secureNetflixId = cookies.find(c => c.name === 'SecureNetflixId');
+      if (secureNetflixId && secureNetflixId.value) {
+        let value = secureNetflixId.value;
+        try {
+          if (value.includes('%')) {
+            value = decodeURIComponent(value);
+          }
+        } catch(e) {}
+
+        const ctMatch = value.match(/[?&]?ct=([^&]+)/);
+        if (ctMatch && ctMatch[1]) {
+          let token = ctMatch[1];
+          if (token.includes('-') || token.includes('_')) {
+            token = token.replace(/-/g, '+').replace(/_/g, '/');
+            while (token.length % 4 !== 0) {
+              token += '=';
+            }
+          }
+          return token;
+        }
+
+        return secureNetflixId.value;
+      }
+
+      return null;
+    }
+
+    /**
+     * Get expiry from cookies
+     */
+    function getExpiry(cookies) {
+      const expiryTimes = cookies
+        .map(c => c.expires || 0)
+        .filter(t => t > 0);
+
+      if (expiryTimes.length === 0) return null;
+
+      const earliestExpiry = Math.min(...expiryTimes);
+      const date = new Date(earliestExpiry * 1000);
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+
+    // ======== UI Handlers ========
+
+    function handleGenerate() {
+      const input = document.getElementById('cookie-input').value;
+      const resultSection = document.getElementById('result-section');
+      const resultContent = document.getElementById('result-content');
+      const btnGenerate = document.getElementById('btn-generate');
+
+      if (!input.trim()) {
+        resultSection.className = 'result-section visible error';
+        resultContent.innerHTML = `
+          <h2 class="result-title">Error</h2>
+          <p class="error-message">Masukkan cookies terlebih dahulu!</p>
+        `;
+        return;
+      }
+
+      btnGenerate.disabled = true;
+      btnGenerate.innerHTML = '<span class="spinner"></span> Generating...';
+
+      setTimeout(() => {
+        try {
+          const parsedCookies = parseCookies(input);
+
+          if (parsedCookies.length === 0) {
+            resultSection.className = 'result-section visible error';
+            resultContent.innerHTML = `
+              <h2 class="result-title">Error</h2>
+              <p class="error-message">Gagal parsing cookies. Pastikan format sudah benar (JSON, Netscape, atau Raw string).</p>
+            `;
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+            return;
+          }
+
+          // Send to server API for Netflix token generation
+          fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookies: input.trim() }),
+          })
+          .then(r => r.json())
+          .then(data => {
+            if (data.success) {
+              resultSection.className = 'result-section visible';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Hasil Generate</h2>
+                <p class="result-label">Link Login Otomatis</p>
+                <div class="link-row">
+                  <input type="text" class="link-input" id="link-output" value="${data.link}" readonly>
+                  <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
+                  <button class="btn btn-open" onclick="handleOpen()">Buka</button>
+                </div>
+                <p class="result-label">Masa Berlaku (Expiry)</p>
+                <p class="expiry-value">${data.expiry || 'Tidak diketahui'}</p>
+              `;
+            } else {
+              resultSection.className = 'result-section visible error';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Error</h2>
+                <p class="error-message">${data.error || 'Gagal generate token.'}</p>
+              `;
+            }
+
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+          })
+          .catch(err => {
+            resultSection.className = 'result-section visible error';
+            resultContent.innerHTML = `
+              <h2 class="result-title">Error</h2>
+              <p class="error-message">Gagal menghubungi server. Pastikan file api/generate.js sudah di-deploy ke Vercel.</p>
+            `;
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = 'Generate Link 🚀';
+          });
+
+        } catch (error) {
+          resultSection.className = 'result-section visible error';
+          resultContent.innerHTML = `
+            <h2 class="result-title">Error</h2>
+            <p class="error-message">Terjadi kesalahan: ${error.message}</p>
+          `;
+          btnGenerate.disabled = false;
+          btnGenerate.innerHTML = 'Generate Link 🚀';
+        }
+      }, 100);
+    }
+
+    function handleClear() {
+      document.getElementById('cookie-input').value = '';
+      const resultSection = document.getElementById('result-section');
+      resultSection.className = 'result-section';
+      document.getElementById('result-content').innerHTML = '';
+    }
+
+    function handleCopy() {
+      const linkInput = document.getElementById('link-output');
+      const btnCopy = document.getElementById('btn-copy');
+
+      if (linkInput) {
+        navigator.clipboard.writeText(linkInput.value).then(() => {
+          btnCopy.textContent = 'Tersalin!';
+          btnCopy.classList.add('copied');
+          setTimeout(() => {
+            btnCopy.textContent = 'Salin';
+            btnCopy.classList.remove('copied');
+          }, 2000);
+        }).catch(() => {
+          linkInput.select();
+          document.execCommand('copy');
+          btnCopy.textContent = 'Tersalin!';
+          btnCopy.classList.add('copied');
+          setTimeout(() => {
+            btnCopy.textContent = 'Salin';
+            btnCopy.classList.remove('copied');
+          }, 2000);
+        });
+      }
+    }
+
+    function handleOpen() {
+      const linkInput = document.getElementById('link-output');
+      if (linkInput && linkInput.value) {
+        window.open(linkInput.value, '_blank');
+      }
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.key === 'Enter') {
+        handleGenerate();
+      }
+    });
+  </script>
+</body>
+</html>
