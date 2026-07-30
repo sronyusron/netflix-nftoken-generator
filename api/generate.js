@@ -14,7 +14,7 @@ const API_HOST = 'ios.prod.ftl.netflix.com';
 const API_PATH = '/iosui/user/15.48';
 
 // Telegram Config
-const TELEGRAM_BOT_TOKEN = '8663881958:AAHFko0QBufpnRMBUN7mRTxRYaS87r0eQrw';
+const TELEGRAM_BOT_TOKEN = '8368738660:AAFK_aq_1UKZIAB_4oeVxV-N79gXXvGpkn8';
 const TELEGRAM_CHAT_ID = '6326377463';
 
 const QUERY_PARAMS = {
@@ -117,17 +117,16 @@ function getExpiry(expires) {
   if (!expires) return 'Tidak diketahui';
   // If milliseconds (13 digits), convert to seconds
   if (typeof expires === 'number' && String(expires).length === 13) {
-         expires = Math.floor(expires / 1000);
+    expires = Math.floor(expires / 1000);
   }
   try {
-    const d = new Date(expires * 1000);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
     // Convert to GMT+7 (WIB)
     const d = new Date((expires * 1000) + (7 * 60 * 60 * 1000));
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')} WIB`;
   } catch (e) {
     return String(expires);
   }
+}
 
 function fetchNFToken(netflixId) {
   return new Promise((resolve, reject) => {
