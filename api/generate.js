@@ -3,14 +3,16 @@
  * POST /api/generate
  * Body: { "cookies": "..." (JSON string of cookie array) }
  * 
- * Sends request to Netflix with cookies to obtain valid nftoken.
+ * Two-step process:
+ * 1. GET /browse with cookies → extract BUILD_IDENTIFIER and authURL
+ * 2. POST /api/shakti/{BUILD_ID}/pathEvaluator → get nftoken
  */
 
 const https = require('https');
+const { URL } = require('url');
 
 function parseCookies(input) {
   const trimmed = input.trim();
-
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     try {
       let parsed = JSON.parse(trimmed);
@@ -18,54 +20,37 @@ function parseCookies(input) {
       return parsed.map(cookie => ({
         name: cookie.name || cookie.Name || '',
         value: cookie.value || cookie.Value || '',
-        domain: cookie.domain || cookie.Domain || '.netflix.com',
         expires: cookie.expires || cookie.expirationDate || cookie.Expires || 0,
       }));
     } catch (e) {}
   }
-
   const lines = trimmed.split('\n').filter(line => line.trim() && !line.startsWith('#'));
   if (lines.some(line => line.split('\t').length >= 7)) {
     const cookies = [];
     for (const line of lines) {
       const parts = line.split('\t');
       if (parts.length >= 7) {
-        cookies.push({
-          name: parts[5].trim(),
-          value: parts[6].trim(),
-          domain: parts[0].trim(),
-          expires: parseInt(parts[4].trim()) || 0,
-        });
+        cookies.push({ name: parts[5].trim(), value: parts[6].trim(), expires: parseInt(parts[4].trim()) || 0 });
       }
     }
     if (cookies.length > 0) return cookies;
   }
-
   if (trimmed.includes('=') && !trimmed.includes('\t')) {
     const pairs = trimmed.split(';').map(p => p.trim()).filter(Boolean);
     const cookies = [];
     for (const pair of pairs) {
       const eqIndex = pair.indexOf('=');
       if (eqIndex > 0) {
-        cookies.push({
-          name: pair.substring(0, eqIndex).trim(),
-          value: pair.substring(eqIndex + 1).trim(),
-          domain: '.netflix.com',
-          expires: 0,
-        });
+        cookies.push({ name: pair.substring(0, eqIndex).trim(), value: pair.substring(eqIndex + 1).trim(), expires: 0 });
       }
     }
     if (cookies.length > 0) return cookies;
   }
-
   return [];
 }
 
 function buildCookieString(cookies) {
-  return cookies
-    .filter(c => c.name && c.value)
-    .map(c => `${c.name}=${c.value}`)
-    .join('; ');
+  return cookies.filter(c => c.name && c.value).map(c => `${c.name}=${c.value}`).join('; ');
 }
 
 function getExpiry(cookies) {
@@ -76,58 +61,100 @@ function getExpiry(cookies) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
-/**
- * Make HTTPS request and follow redirects (up to 5)
- */
-function httpsRequest(options, maxRedirects = 5) {
+function httpsGet(url, cookieString) {
   return new Promise((resolve, reject) => {
-    const makeRequest = (opts, redirectsLeft) => {
-      const req = https.request(opts, (res) => {
-        // Follow redirects
-        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location && redirectsLeft > 0) {
-          const redirectUrl = new URL(res.headers.location, `https://${opts.hostname}${opts.path}`);
-          
-          // Check if redirect URL contains nftoken
-          const nftokenMatch = redirectUrl.href.match(/nftoken=([^&\s]+)/);
-          if (nftokenMatch) {
-            resolve({ statusCode: res.statusCode, headers: res.headers, body: '', nftoken: nftokenMatch[1], redirectUrl: redirectUrl.href });
-            return;
-          }
-
-          const newOpts = {
-            ...opts,
-            hostname: redirectUrl.hostname,
-            path: redirectUrl.pathname + redirectUrl.search,
-          };
-          // Carry cookies through redirect
-          makeRequest(newOpts, redirectsLeft - 1);
-          res.resume(); // Consume response
-          return;
-        }
-
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          // Search for nftoken in body
-          let nftoken = null;
-          const bodyMatch = data.match(/nftoken=([^&"'\s<>]+)/i);
-          if (bodyMatch) nftoken = bodyMatch[1];
-
-          // Search in location header
-          const loc = res.headers.location || '';
-          const locMatch = loc.match(/nftoken=([^&\s]+)/);
-          if (locMatch) nftoken = locMatch[1];
-
-          resolve({ statusCode: res.statusCode, headers: res.headers, body: data, nftoken: nftoken });
-        });
-      });
-
-      req.on('error', reject);
-      req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
-      req.end();
+    const parsed = new URL(url);
+    const options = {
+      hostname: parsed.hostname,
+      port: 443,
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cookie': cookieString,
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+      },
     };
 
-    makeRequest(options, maxRedirects);
+    const req = https.request(options, (res) => {
+      // Follow redirects
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        const redirectUrl = new URL(res.headers.location, url);
+        // Check if redirect contains nftoken
+        const nftMatch = redirectUrl.href.match(/nftoken=([^&\s]+)/);
+        if (nftMatch) {
+          resolve({ body: '', nftoken: nftMatch[1], statusCode: res.statusCode });
+          res.resume();
+          return;
+        }
+        res.resume();
+        httpsGet(redirectUrl.href, cookieString).then(resolve).catch(reject);
+        return;
+      }
+
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const nftMatch = data.match(/nftoken=([^&"'\s<>]+)/i);
+        resolve({ body: data, nftoken: nftMatch ? nftMatch[1] : null, statusCode: res.statusCode, headers: res.headers });
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.end();
+  });
+}
+
+function httpsPost(url, cookieString, postBody, contentType) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options = {
+      hostname: parsed.hostname,
+      port: 443,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Content-Type': contentType || 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postBody),
+        'Cookie': cookieString,
+        'X-Netflix.Client.Request.Name': 'ui/nftoken',
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        const redirectUrl = new URL(res.headers.location, url);
+        const nftMatch = redirectUrl.href.match(/nftoken=([^&\s]+)/);
+        if (nftMatch) {
+          resolve({ body: '', nftoken: nftMatch[1], statusCode: res.statusCode });
+          res.resume();
+          return;
+        }
+        res.resume();
+        resolve({ body: '', nftoken: null, statusCode: res.statusCode, location: res.headers.location });
+        return;
+      }
+
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const nftMatch = data.match(/nftoken['":\s]*=?\s*['"]?([A-Za-z0-9+/=]{100,})/);
+        resolve({ body: data, nftoken: nftMatch ? nftMatch[1] : null, statusCode: res.statusCode });
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.write(postBody);
+    req.end();
   });
 }
 
@@ -141,7 +168,6 @@ module.exports = async (req, res) => {
 
   try {
     const { cookies: cookieInput } = req.body;
-
     if (!cookieInput || typeof cookieInput !== 'string') {
       return res.status(400).json({ success: false, error: 'Input cookies tidak valid.' });
     }
@@ -155,130 +181,125 @@ module.exports = async (req, res) => {
     const expiry = getExpiry(parsedCookies);
     let nftoken = null;
     let method = '';
+    let debugInfo = [];
 
-    // Method 1: GET /token - Netflix token generation endpoint
+    // Step 1: GET /browse to extract BUILD_IDENTIFIER and authURL
+    let buildId = null;
+    let authURL = null;
+
     try {
-      const result = await httpsRequest({
-        hostname: 'www.netflix.com',
-        port: 443,
-        path: '/token',
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Cookie': cookieString,
-        },
-      });
+      const browseResult = await httpsGet('https://www.netflix.com/browse', cookieString);
+      debugInfo.push({ step: 'browse', status: browseResult.statusCode, bodyLen: browseResult.body.length });
 
-      if (result.nftoken) {
-        nftoken = result.nftoken;
-        method = 'token';
+      if (browseResult.nftoken) {
+        nftoken = browseResult.nftoken;
+        method = 'browse-redirect';
+      } else {
+        // Extract BUILD_IDENTIFIER
+        const buildMatch = browseResult.body.match(/\"BUILD_IDENTIFIER\"\s*:\s*\"([^\"]+)\"/);
+        if (buildMatch) buildId = buildMatch[1];
+
+        // Extract authURL
+        const authMatch = browseResult.body.match(/\"authURL\"\s*:\s*\"([^\"]+)\"/);
+        if (authMatch) authURL = authMatch[1];
+
+        debugInfo.push({ buildId, authURL: authURL ? authURL.substring(0, 20) + '...' : null });
       }
-    } catch (e) {}
-
-    // Method 2: GET /LoginTransfer - Netflix generates nftoken in redirect
-    if (!nftoken) {
-      try {
-        const result = await httpsRequest({
-          hostname: 'www.netflix.com',
-          port: 443,
-          path: '/LoginTransfer',
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Cookie': cookieString,
-          },
-        });
-
-        if (result.nftoken) {
-          nftoken = result.nftoken;
-          method = 'LoginTransfer';
-        }
-      } catch (e) {}
+    } catch (e) {
+      debugInfo.push({ step: 'browse', error: e.message });
     }
 
-    // Method 3: GET /nftoken - direct token endpoint
-    if (!nftoken) {
+    // Step 2: Use Shakti API to get nftoken
+    if (!nftoken && buildId && authURL) {
       try {
-        const result = await httpsRequest({
-          hostname: 'www.netflix.com',
-          port: 443,
-          path: '/nftoken',
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Cookie': cookieString,
-          },
-        });
+        const shaktiUrl = `https://www.netflix.com/api/shakti/${buildId}/pathEvaluator?materialize=true`;
+        const postBody = `path=["nftoken"]&authURL=${encodeURIComponent(authURL)}`;
+        const shaktiResult = await httpsPost(shaktiUrl, cookieString, postBody, 'application/x-www-form-urlencoded');
+        debugInfo.push({ step: 'shakti', status: shaktiResult.statusCode, bodyLen: shaktiResult.body.length });
 
-        if (result.nftoken) {
-          nftoken = result.nftoken;
-          method = 'nftoken endpoint';
+        if (shaktiResult.nftoken) {
+          nftoken = shaktiResult.nftoken;
+          method = 'shakti';
+        } else {
+          // Try parsing JSON response for token
+          try {
+            const jsonData = JSON.parse(shaktiResult.body);
+            // Look for nftoken in various places in the response
+            const findToken = (obj, depth = 0) => {
+              if (depth > 5 || !obj) return null;
+              if (typeof obj === 'string' && obj.length > 100 && obj.match(/^[A-Za-z0-9+/=_-]+$/)) return obj;
+              if (typeof obj === 'object') {
+                for (const key of Object.keys(obj)) {
+                  if (key.toLowerCase().includes('token') || key.toLowerCase().includes('nftoken')) {
+                    if (typeof obj[key] === 'string') return obj[key];
+                  }
+                  const found = findToken(obj[key], depth + 1);
+                  if (found) return found;
+                }
+              }
+              return null;
+            };
+            const found = findToken(jsonData);
+            if (found) {
+              nftoken = found;
+              method = 'shakti-json';
+            }
+          } catch (e) {}
         }
-      } catch (e) {}
+      } catch (e) {
+        debugInfo.push({ step: 'shakti', error: e.message });
+      }
     }
 
-    // Method 4: GET /YourAccount - parse token from page
+    // Step 3: Try /LoginTransfer
     if (!nftoken) {
       try {
-        const result = await httpsRequest({
-          hostname: 'www.netflix.com',
-          port: 443,
-          path: '/YourAccount',
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Cookie': cookieString,
-          },
-        });
-
-        if (result.nftoken) {
-          nftoken = result.nftoken;
-          method = 'YourAccount';
-        }
-      } catch (e) {}
+        const result = await httpsGet('https://www.netflix.com/LoginTransfer', cookieString);
+        debugInfo.push({ step: 'LoginTransfer', status: result.statusCode });
+        if (result.nftoken) { nftoken = result.nftoken; method = 'LoginTransfer'; }
+      } catch (e) {
+        debugInfo.push({ step: 'LoginTransfer', error: e.message });
+      }
     }
 
-    // Method 5: GET /browse - sometimes nftoken in page source
+    // Step 4: Try /token
     if (!nftoken) {
       try {
-        const result = await httpsRequest({
-          hostname: 'www.netflix.com',
-          port: 443,
-          path: '/browse',
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Cookie': cookieString,
-          },
-        });
+        const result = await httpsGet('https://www.netflix.com/token', cookieString);
+        debugInfo.push({ step: 'token', status: result.statusCode });
+        if (result.nftoken) { nftoken = result.nftoken; method = 'token'; }
+      } catch (e) {
+        debugInfo.push({ step: 'token', error: e.message });
+      }
+    }
 
-        if (result.nftoken) {
-          nftoken = result.nftoken;
-          method = 'browse';
-        }
-      } catch (e) {}
+    // Step 5: Try Shakti with different path format
+    if (!nftoken && buildId && authURL) {
+      try {
+        const shaktiUrl = `https://www.netflix.com/api/shakti/${buildId}/pathEvaluator`;
+        const postBody = `path=["tokenGeneration","nftoken"]&authURL=${encodeURIComponent(authURL)}`;
+        const result = await httpsPost(shaktiUrl, cookieString, postBody, 'application/x-www-form-urlencoded');
+        debugInfo.push({ step: 'shakti2', status: result.statusCode });
+        if (result.nftoken) { nftoken = result.nftoken; method = 'shakti2'; }
+      } catch (e) {
+        debugInfo.push({ step: 'shakti2', error: e.message });
+      }
     }
 
     if (nftoken) {
       return res.status(200).json({
-        success: true,
-        link: `https://netflix.com/?nftoken=${nftoken}`,
+        token: nftoken,
+        loginLink: `https://netflix.com/?nftoken=${nftoken}`,
         expiry: expiry || 'Tidak diketahui',
         cookieCount: parsedCookies.length,
-        method: method,
+        method,
       });
     }
 
     return res.status(200).json({
       success: false,
-      error: 'Gagal mendapatkan nftoken dari Netflix. Cookies mungkin sudah expired atau Netflix memblokir request dari server ini.',
+      error: 'Gagal mendapatkan nftoken dari Netflix. Cookies mungkin expired atau endpoint berubah.',
+      debug: debugInfo,
       cookieCount: parsedCookies.length,
     });
 

@@ -527,7 +527,20 @@ Format yang didukung: JSON array, Netscape, atau Raw string."></textarea>
           })
           .then(r => r.json())
           .then(data => {
-            if (data.success) {
+            if (data.loginLink) {
+              resultSection.className = 'result-section visible';
+              resultContent.innerHTML = `
+                <h2 class="result-title">Hasil Generate</h2>
+                <p class="result-label">Link Login Otomatis</p>
+                <div class="link-row">
+                  <input type="text" class="link-input" id="link-output" value="${data.loginLink}" readonly>
+                  <button class="btn btn-copy" id="btn-copy" onclick="handleCopy()">Salin</button>
+                  <button class="btn btn-open" onclick="handleOpen()">Buka</button>
+                </div>
+                <p class="result-label">Masa Berlaku (Expiry)</p>
+                <p class="expiry-value">${data.expiry || 'Tidak diketahui'}</p>
+              `;
+            } else if (data.success && data.link) {
               resultSection.className = 'result-section visible';
               resultContent.innerHTML = `
                 <h2 class="result-title">Hasil Generate</h2>
